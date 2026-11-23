@@ -361,15 +361,7 @@ export default function Home() {
       <header className="bg-[#23272A] text-[#F7F5F0] px-6 py-4 shadow-sm">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="flex items-center font-black text-2xl tracking-tight">
-              <span>SMY</span>
-              <span className="relative inline-flex items-center text-[#F2994A]">
-                B
-                <span className="text-xs ml-0.5" aria-hidden="true">
-                  🛒
-                </span>
-              </span>
-            </div>
+            <img src="/logo.png" alt="SMYB" className="h-10 w-auto rounded-lg bg-[#F7F5F0] px-2.5 py-1 object-contain" />
             <span className="hidden sm:inline-block text-xs text-stone-400 border-l border-stone-600 pl-3">
               Send Me Your Basket
             </span>
