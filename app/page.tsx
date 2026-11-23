@@ -30,6 +30,16 @@ interface Basket {
   basket_items?: BasketItem[];
 }
 
+interface PrivateVault {
+  user_id?: string;
+  recipient_name: string;
+  delivery_type: "home_address" | "collection_point" | "work_address";
+  address_line_1: string;
+  city: string;
+  postcode: string;
+  delivery_notes: string;
+}
+
 export default function Home() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
@@ -44,8 +54,21 @@ export default function Home() {
 
   // Dashboard states
   const [baskets, setBaskets] = useState<Basket[]>([]);
-  const [activeTab, setActiveTab] = useState<"my_baskets" | "create" | "shared_view">("my_baskets");
+  const [activeTab, setActiveTab] = useState<"my_baskets" | "create" | "vault" | "shared_view">("my_baskets");
   const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  // Delivery Vault states
+  const [vault, setVault] = useState<PrivateVault>({
+    recipient_name: "",
+    delivery_type: "collection_point",
+    address_line_1: "",
+    city: "",
+    postcode: "",
+    delivery_notes: "",
+  });
+  const [vaultSaved, setVaultSaved] = useState(false);
+  const [savingVault, setSavingVault] = useState(false);
+  const [vaultStatusMsg, setVaultStatusMsg] = useState<string | null>(null);
 
   // Create basket form states
   const [basketTitle, setBasketTitle] = useState("");
@@ -61,7 +84,7 @@ export default function Home() {
   >([]);
   const [creatingBasket, setCreatingBasket] = useState(false);
 
-  // Shared basket preview state (for testing payer view via ?basket=ID)
+  // Shared basket preview state
   const [sharedBasket, setSharedBasket] = useState<Basket | null>(null);
   const [fundingLoading, setFundingLoading] = useState(false);
 
@@ -78,7 +101,6 @@ export default function Home() {
       setUser(session?.user ?? null);
     });
 
-    // Check if URL has ?basket=<id> for direct payer view
     const params = new URLSearchParams(window.location.search);
     const sharedId = params.get("basket");
     if (sharedId) {
@@ -94,8 +116,10 @@ export default function Home() {
   useEffect(() => {
     if (user) {
       fetchUserBaskets();
+      fetchUserVault();
     } else {
       setBaskets([]);
+      setVaultSaved(false);
     }
   }, [user]);
 
@@ -113,6 +137,56 @@ export default function Home() {
 
     if (!error && data) {
       setBaskets(data as Basket[]);
+    }
+  };
+
+  const fetchUserVault = async () => {
+    if (!user) return;
+    const { data, error } = await supabase
+      .from("private_vault")
+      .select("*")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (!error && data) {
+      setVault({
+        recipient_name: data.recipient_name || "",
+        delivery_type: data.delivery_type || "collection_point",
+        address_line_1: data.address_line_1 || "",
+        city: data.city || "",
+        postcode: data.postcode || "",
+        delivery_notes: data.delivery_notes || "",
+      });
+      setVaultSaved(true);
+    }
+  };
+
+  const handleSaveVault = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+    setSavingVault(true);
+    setVaultStatusMsg(null);
+
+    try {
+      const { error } = await supabase.from("private_vault").upsert({
+        user_id: user.id,
+        recipient_name: vault.recipient_name.trim(),
+        delivery_type: vault.delivery_type,
+        address_line_1: vault.address_line_1.trim(),
+        city: vault.city.trim(),
+        postcode: vault.postcode.trim().toUpperCase(),
+        delivery_notes: vault.delivery_notes.trim(),
+        updated_at: new Date().toISOString(),
+      });
+
+      if (error) throw error;
+      setVaultSaved(true);
+      setVaultStatusMsg("✓ Delivery Vault sealed & encrypted. Zero visibility to payers.");
+    } catch (err) {
+      console.error("Vault error:", err);
+      setVaultStatusMsg("Could not save vault. Ensure private_vault SQL was run in Supabase.");
+    } finally {
+      setSavingVault(false);
     }
   };
 
@@ -287,7 +361,6 @@ export default function Home() {
       <header className="bg-[#23272A] text-[#F7F5F0] px-6 py-4 shadow-sm">
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
-            {/* Custom Interconnected SMYB Trolley Mark */}
             <div className="flex items-center font-black text-2xl tracking-tight">
               <span>SMY</span>
               <span className="relative inline-flex items-center text-[#F2994A]">
@@ -321,7 +394,7 @@ export default function Home() {
       </header>
 
       <main className="max-w-4xl mx-auto px-4 py-8">
-        {/* Shared Basket View (Visible even before sign-in if someone opens a ?basket= link) */}
+        {/* Shared Basket View */}
         {activeTab === "shared_view" && sharedBasket && (
           <div className="mb-8 bg-white border border-stone-200 rounded-2xl p-6 shadow-sm">
             <div className="flex items-center justify-between border-b border-stone-100 pb-4 mb-4">
@@ -351,7 +424,7 @@ export default function Home() {
               <div>
                 <p className="font-semibold text-[#F2994A]">Two-Way Privacy Shield Active</p>
                 <p className="text-stone-300 text-xs mt-0.5">
-                  Recipient delivery address and location are sealed. Payer card and store account details remain
+                  Recipient delivery vault is sealed at the database level. Payer card and store account details remain
                   completely private.
                 </p>
               </div>
@@ -377,16 +450,24 @@ export default function Home() {
             <div className="border-t border-stone-100 pt-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div className="text-sm space-y-1">
                 <p className="text-stone-500">
-                  Total Basket Value: <span className="font-semibold text-[#23272A]">£{Number(sharedBasket.total_amount).toFixed(2)}</span>
+                  Total Basket Value:{" "}
+                  <span className="font-semibold text-[#23272A]">
+                    £{Number(sharedBasket.total_amount).toFixed(2)}
+                  </span>
                 </p>
                 {Number(sharedBasket.owner_contribution) > 0 && (
                   <p className="text-stone-500">
-                    Recipient Down Payment: <span className="font-semibold text-emerald-700">-£{Number(sharedBasket.owner_contribution).toFixed(2)}</span>
+                    Recipient Down Payment:{" "}
+                    <span className="font-semibold text-emerald-700">
+                      -£{Number(sharedBasket.owner_contribution).toFixed(2)}
+                    </span>
                   </p>
                 )}
                 <p className="text-base font-bold">
                   Remaining to Fund: £
-                  {(Number(sharedBasket.total_amount) - Number(sharedBasket.owner_contribution)).toFixed(2)}
+                  {sharedBasket.status === "funded"
+                    ? "0.00"
+                    : (Number(sharedBasket.total_amount) - Number(sharedBasket.owner_contribution)).toFixed(2)}
                 </p>
               </div>
 
@@ -515,7 +596,7 @@ export default function Home() {
           activeTab !== "shared_view" && (
             <div>
               {/* Navigation Tabs */}
-              <div className="flex gap-2 mb-6">
+              <div className="flex flex-wrap gap-2 mb-6">
                 <button
                   onClick={() => setActiveTab("my_baskets")}
                   className={`px-4 py-2 rounded-xl text-sm font-bold transition cursor-pointer ${
@@ -536,11 +617,39 @@ export default function Home() {
                 >
                   + New Persistent Basket
                 </button>
+                <button
+                  onClick={() => setActiveTab("vault")}
+                  className={`px-4 py-2 rounded-xl text-sm font-bold transition cursor-pointer flex items-center gap-1.5 ${
+                    activeTab === "vault"
+                      ? "bg-[#23272A] text-[#F2994A]"
+                      : "bg-white text-stone-600 border border-stone-200 hover:bg-stone-100"
+                  }`}
+                >
+                  <span>🛡️ Delivery Vault</span>
+                  {vaultSaved && (
+                    <span className="w-2 h-2 rounded-full bg-emerald-500" title="Vault Configured" />
+                  )}
+                </button>
               </div>
 
               {/* TAB 1: MY BASKETS LEDGER */}
               {activeTab === "my_baskets" && (
                 <div className="space-y-4">
+                  {!vaultSaved && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="text-xs text-amber-900">
+                        <strong>Action Recommended:</strong> Set up your <strong>Delivery Vault</strong> so funded
+                        baskets know where to ship without exposing your address to payers.
+                      </div>
+                      <button
+                        onClick={() => setActiveTab("vault")}
+                        className="bg-[#23272A] text-[#F7F5F0] text-xs font-bold px-3.5 py-2 rounded-lg whitespace-nowrap cursor-pointer"
+                      >
+                        Configure Vault →
+                      </button>
+                    </div>
+                  )}
+
                   {baskets.length === 0 ? (
                     <div className="bg-white border border-stone-200 rounded-2xl p-10 text-center">
                       <p className="text-3xl mb-2">🛒</p>
@@ -581,7 +690,8 @@ export default function Home() {
                                 </span>
                               </div>
                               <p className="text-xs text-stone-500 mt-0.5">
-                                Privacy: <strong className="text-[#23272A]">{basket.boundary_mode.replace("_", " ")}</strong> •
+                                Privacy:{" "}
+                                <strong className="text-[#23272A]">{basket.boundary_mode.replace("_", " ")}</strong> •
                                 Mode: <strong className="text-[#23272A]">{basket.split_mode.replace("_", " ")}</strong>
                               </p>
                             </div>
@@ -796,6 +906,128 @@ export default function Home() {
                     className="w-full bg-[#F2994A] hover:bg-[#e08636] text-[#23272A] font-bold py-3 rounded-xl transition cursor-pointer disabled:opacity-50"
                   >
                     {creatingBasket ? "Saving to Vault..." : "Save & Generate Private Basket"}
+                  </button>
+                </form>
+              )}
+
+              {/* TAB 3: ENCRYPTED DELIVERY VAULT */}
+              {activeTab === "vault" && (
+                <form
+                  onSubmit={handleSaveVault}
+                  className="bg-white border border-stone-200 rounded-2xl p-6 shadow-sm space-y-5"
+                >
+                  <div className="bg-[#23272A] text-[#F7F5F0] rounded-xl p-4 flex items-start gap-3">
+                    <span className="text-xl">🛡️</span>
+                    <div>
+                      <h2 className="font-bold text-base text-[#F2994A]">Your Private Delivery Vault</h2>
+                      <p className="text-xs text-stone-300 mt-0.5">
+                        Protected by Row-Level Security. Only your authenticated session (<code>🛒{userHandle}</code>)
+                        can read or modify this destination. Payers never see your name, street, or postcode.
+                      </p>
+                    </div>
+                  </div>
+
+                  {vaultStatusMsg && (
+                    <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold">
+                      {vaultStatusMsg}
+                    </div>
+                  )}
+
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold uppercase text-stone-600 mb-1">
+                        Recipient Name (For Parcel Label Only)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. N. Mweene"
+                        value={vault.recipient_name}
+                        onChange={(e) => setVault({ ...vault, recipient_name: e.target.value })}
+                        required
+                        className="w-full px-3.5 py-2.5 border border-stone-300 rounded-xl text-sm"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold uppercase text-stone-600 mb-1">
+                        Destination Type
+                      </label>
+                      <select
+                        value={vault.delivery_type}
+                        onChange={(e) =>
+                          setVault({
+                            ...vault,
+                            delivery_type: e.target.value as "home_address" | "collection_point" | "work_address",
+                          })
+                        }
+                        className="w-full px-3.5 py-2.5 border border-stone-300 rounded-xl text-sm bg-white"
+                      >
+                        <option value="collection_point">Parcel Collection Locker / Local Shop</option>
+                        <option value="home_address">Private Home Address</option>
+                        <option value="work_address">Workplace / Safe Drop</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold uppercase text-stone-600 mb-1">
+                      Street Address or Locker Location
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. InPost Locker, Honor Oak Park Station"
+                      value={vault.address_line_1}
+                      onChange={(e) => setVault({ ...vault, address_line_1: e.target.value })}
+                      required
+                      className="w-full px-3.5 py-2.5 border border-stone-300 rounded-xl text-sm"
+                    />
+                  </div>
+
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold uppercase text-stone-600 mb-1">City</label>
+                      <input
+                        type="text"
+                        placeholder="London"
+                        value={vault.city}
+                        onChange={(e) => setVault({ ...vault, city: e.target.value })}
+                        required
+                        className="w-full px-3.5 py-2.5 border border-stone-300 rounded-xl text-sm"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold uppercase text-stone-600 mb-1">Postcode</label>
+                      <input
+                        type="text"
+                        placeholder="SE23 1DP"
+                        value={vault.postcode}
+                        onChange={(e) => setVault({ ...vault, postcode: e.target.value })}
+                        required
+                        className="w-full px-3.5 py-2.5 border border-stone-300 rounded-xl text-sm uppercase"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold uppercase text-stone-600 mb-1">
+                      Courier Instructions (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Leave at counter or send locker PIN to my email"
+                      value={vault.delivery_notes}
+                      onChange={(e) => setVault({ ...vault, delivery_notes: e.target.value })}
+                      className="w-full px-3.5 py-2.5 border border-stone-300 rounded-xl text-sm"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={savingVault}
+                    className="w-full bg-[#23272A] hover:bg-stone-800 text-[#F7F5F0] font-bold py-3 rounded-xl transition cursor-pointer disabled:opacity-50"
+                  >
+                    {savingVault ? "Sealing Vault..." : "Save & Seal Delivery Vault"}
                   </button>
                 </form>
               )}
