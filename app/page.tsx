@@ -474,8 +474,8 @@ export default function Home() {
 
       const cleanName = guestName.trim();
       const cleanEmail = guestEmail.trim();
-      if (!cleanName || !cleanEmail) {
-        throw new Error("Enter your name and email address to continue.");
+      if (!cleanEmail) {
+        throw new Error("Enter your email address to continue.");
       }
 
       const response = await fetch("/api/checkout", {
@@ -485,7 +485,7 @@ export default function Home() {
           basketId: sharedBasket.id,
           title: sharedBasket.title,
           totalAmount: sharedBasket.total_amount,
-          payerName: cleanName,
+          payerName: cleanName || "Guest",
           payerEmail: cleanEmail,
         }),
       });
@@ -693,7 +693,7 @@ export default function Home() {
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div>
                     <label htmlFor="guest-name" className="mb-1 block text-xs font-bold uppercase tracking-wider text-stone-600">
-                      Name
+                      Name (optional)
                     </label>
                     <input
                       id="guest-name"
@@ -701,7 +701,7 @@ export default function Home() {
                       autoComplete="name"
                       value={guestName}
                       onChange={(e) => setGuestName(e.target.value)}
-                      required
+                      placeholder="Guest"
                       className="w-full rounded-xl border border-stone-300 bg-white px-3.5 py-2.5 text-sm focus:border-[#23272A] focus:outline-none"
                     />
                   </div>
@@ -1111,6 +1111,9 @@ export default function Home() {
                   ) : (
                     baskets.map((basket) => {
                       const remaining = Number(basket.total_amount) - Number(basket.owner_contribution);
+                      const fundedBy = basket.funded_by?.trim();
+                      const fundingDisplayName =
+                        fundedBy && fundedBy.toLowerCase() !== "null" ? fundedBy : "Guest";
                       return (
                         <div
                           key={basket.id}
@@ -1143,7 +1146,7 @@ export default function Home() {
                               <p className="text-xs text-stone-500">Total: £{Number(basket.total_amount).toFixed(2)}</p>
                               <p className="font-bold text-base text-[#23272A]">
                                 {isBasketFunded(basket)
-                                  ? `Funded by 🛒${basket.funded_by || basket.payer_handle}`
+                                  ? `Funded by 🛒${fundingDisplayName}`
                                   : `Requesting: £${remaining.toFixed(2)}`}
                               </p>
                             </div>

@@ -39,6 +39,7 @@ export async function POST(req: Request) {
   if (!Number.isSafeInteger(unitAmount) || unitAmount <= 0) {
     return Response.json({ error: "Invalid checkout amount" }, { status: 400 });
   }
+  const normalizedPayerName = payerName?.trim() || "Guest";
 
   const origin = req.headers.get("origin");
   if (!origin) {
@@ -59,7 +60,7 @@ export async function POST(req: Request) {
       },
     ],
     customer_email: payerEmail || undefined,
-    metadata: { basketId, payerName: payerName || "Guest" },
+    metadata: { basketId, payerName: normalizedPayerName },
     success_url: `${origin}/?basket=${basketId}&funded=success&session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${origin}/?basket=${basketId}`,
   });

@@ -49,6 +49,7 @@ export async function POST(req: Request) {
     .from("baskets")
     .update({
       status: "funded",
+      funded_by: session.metadata?.payerName || "Guest",
     })
     .eq("id", body.basketId)
     .select("id")
