@@ -50,7 +50,10 @@ export default function Home() {
   const [password, setPassword] = useState("");
   const [handleInput, setHandleInput] = useState("");
   const [authError, setAuthError] = useState<string | null>(null);
+  const [authNotice, setAuthNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const [authLoading, setAuthLoading] = useState(false);
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
+  const [passwordUpdated, setPasswordUpdated] = useState(false);
 
   // Dashboard states
   const [baskets, setBaskets] = useState<Basket[]>([]);
@@ -97,8 +100,15 @@ export default function Home() {
 
     checkSession();
 
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       setUser(session?.user ?? null);
+      if (event === "PASSWORD_RECOVERY") {
+        setIsPasswordRecovery(true);
+        setPasswordUpdated(false);
+        setPassword("");
+        setAuthError(null);
+        setAuthNotice(null);
+      }
     });
 
     const params = new URLSearchParams(window.location.search);
@@ -205,6 +215,7 @@ export default function Home() {
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
+    setAuthNotice(null);
     setAuthLoading(true);
 
     try {
@@ -231,6 +242,50 @@ export default function Home() {
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Authentication failed.";
       setAuthError(message);
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    setAuthError(null);
+    setAuthNotice(null);
+    setAuthLoading(true);
+
+    try {
+      if (!email.trim()) {
+        throw new Error("Enter your email address to receive a password reset link.");
+      }
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: window.location.origin,
+      });
+      if (error) throw error;
+      setAuthNotice({
+        type: "success",
+        message: `If an account exists for ${email}, we've sent a password reset link.`,
+      });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Unable to send a password reset link.";
+      setAuthNotice({ type: "error", message });
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const handleUpdatePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthNotice(null);
+    setAuthLoading(true);
+
+    try {
+      const { error } = await supabase.auth.updateUser({ password });
+      if (error) throw error;
+      setPasswordUpdated(true);
+      setPassword("");
+      setAuthNotice({ type: "success", message: "Your password has been updated." });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Unable to update your password.";
+      setAuthNotice({ type: "error", message });
     } finally {
       setAuthLoading(false);
     }
@@ -387,7 +442,7 @@ export default function Home() {
 
       <main className="max-w-4xl mx-auto px-4 py-8">
         {/* Shared Basket View */}
-        {activeTab === "shared_view" && sharedBasket && (
+        {!isPasswordRecovery && activeTab === "shared_view" && sharedBasket && (
           <div className="mb-8 bg-white border border-stone-200 rounded-2xl p-6 shadow-sm">
             <div className="flex items-center justify-between border-b border-stone-100 pb-4 mb-4">
               <div>
@@ -495,7 +550,55 @@ export default function Home() {
         )}
 
         {/* Unauthenticated Sign Up / Log In Card */}
-        {!user ? (
+        {isPasswordRecovery ? (
+          <div className="max-w-md mx-auto bg-white rounded-2xl shadow-sm border border-stone-200 p-8">
+            <h1 className="text-2xl font-bold text-[#23272A] mb-1">Choose a new password</h1>
+            <p className="text-sm text-stone-500 mb-6">Enter a new password for your SMYB account.</p>
+
+            {authNotice && (
+              <div
+                role={authNotice.type === "error" ? "alert" : "status"}
+                className="mb-4 p-3 rounded-xl bg-[#23272A] border border-[#F2994A] text-[#F7F5F0] text-xs"
+              >
+                {authNotice.message}
+              </div>
+            )}
+
+            {passwordUpdated ? (
+              <button
+                type="button"
+                onClick={() => setIsPasswordRecovery(false)}
+                className="w-full bg-[#23272A] hover:bg-stone-800 text-[#F7F5F0] font-bold py-3 rounded-xl transition cursor-pointer"
+              >
+                Continue to your account
+              </button>
+            ) : (
+              <form onSubmit={handleUpdatePassword} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-stone-600 mb-1">
+                    New Password
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    minLength={6}
+                    className="w-full px-3.5 py-2.5 border border-stone-300 rounded-xl text-sm focus:outline-none focus:border-[#23272A]"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  disabled={authLoading}
+                  className="w-full bg-[#23272A] hover:bg-stone-800 text-[#F7F5F0] font-bold py-3 rounded-xl transition cursor-pointer disabled:opacity-50"
+                >
+                  {authLoading ? "Please wait..." : "Update Password"}
+                </button>
+              </form>
+            )}
+          </div>
+        ) : !user ? (
           <div className="max-w-md mx-auto bg-white rounded-2xl shadow-sm border border-stone-200 p-8">
             <h1 className="text-2xl font-bold text-[#23272A] mb-1">
               {isSignUp ? "Claim your SMYB handle" : "Welcome back to SMYB"}
@@ -509,6 +612,14 @@ export default function Home() {
             {authError && (
               <div className="mb-4 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs">
                 {authError}
+              </div>
+            )}
+            {authNotice && (
+              <div
+                role={authNotice.type === "error" ? "alert" : "status"}
+                className="mb-4 p-3 rounded-xl bg-[#23272A] border border-[#F2994A] text-[#F7F5F0] text-xs"
+              >
+                {authNotice.message}
               </div>
             )}
 
@@ -559,6 +670,16 @@ export default function Home() {
                   minLength={6}
                   className="w-full px-3.5 py-2.5 border border-stone-300 rounded-xl text-sm focus:outline-none focus:border-[#23272A]"
                 />
+                {!isSignUp && (
+                  <button
+                    type="button"
+                    onClick={handleForgotPassword}
+                    disabled={authLoading}
+                    className="mt-2 text-xs text-stone-600 hover:text-[#23272A] underline cursor-pointer disabled:opacity-50"
+                  >
+                    Forgot password?
+                  </button>
+                )}
               </div>
 
               <button
@@ -576,6 +697,7 @@ export default function Home() {
                 onClick={() => {
                   setIsSignUp(!isSignUp);
                   setAuthError(null);
+                  setAuthNotice(null);
                 }}
                 className="text-sm text-stone-600 hover:text-[#23272A] font-medium underline cursor-pointer"
               >
