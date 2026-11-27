@@ -436,15 +436,20 @@ export default function Home() {
         throw new Error("Enter your name and email address to continue.");
       }
 
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from("baskets")
         .update({
           status: "FUNDED",
           funded_by: cleanName,
         })
-        .eq("id", sharedBasket.id);
+        .eq("id", sharedBasket.id)
+        .select();
 
-      if (error) throw error;
+      if (error || !data || data.length === 0) {
+        console.error("Guest funding update failed:", error ?? "No rows were updated.");
+        alert("Database update blocked by permissions");
+        return;
+      }
       setSharedBasket((current) =>
         current?.id === sharedBasket.id
           ? { ...current, status: "FUNDED", funded_by: cleanName }
