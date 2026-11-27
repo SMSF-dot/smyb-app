@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { supabase } from "../utils/supabase";
 import type { User } from "@supabase/supabase-js";
 
@@ -100,6 +100,58 @@ export default function Home() {
   const [guestFundingError, setGuestFundingError] = useState<string | null>(null);
   const [guestReceiptNotice, setGuestReceiptNotice] = useState<string | null>(null);
 
+  const fetchSingleBasket = useCallback(async (basketId: string) => {
+    const { data, error } = await supabase
+      .from("baskets")
+      .select("*, basket_items(*)")
+      .eq("id", basketId)
+      .single();
+
+    if (error) throw error;
+    if (!data) throw new Error("Basket not found.");
+    setSharedBasket(data as Basket);
+  }, []);
+
+  const fetchUserBaskets = useCallback(async () => {
+    if (!user) return;
+    const { data, error } = await supabase
+      .from("baskets")
+      .select("*, basket_items(*)")
+      .eq("owner_id", user.id)
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      console.error("Error fetching user baskets:", error);
+      return;
+    }
+    if (data) setBaskets(data as Basket[]);
+  }, [user]);
+
+  const fetchUserVault = useCallback(async () => {
+    if (!user) return;
+    const { data, error } = await supabase
+      .from("private_vault")
+      .select("*")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (error) {
+      console.error("Error fetching user vault:", error);
+      return;
+    }
+    if (data) {
+      setVault({
+        recipient_name: data.recipient_name || "",
+        delivery_type: data.delivery_type || "collection_point",
+        address_line_1: data.address_line_1 || "",
+        city: data.city || "",
+        postcode: data.postcode || "",
+        delivery_notes: data.delivery_notes || "",
+      });
+      setVaultSaved(true);
+    }
+  }, [user]);
+
   useEffect(() => {
     const checkSession = async () => {
       const { data } = await supabase.auth.getSession();
@@ -123,14 +175,48 @@ export default function Home() {
     const params = new URLSearchParams(window.location.search);
     const sharedId = params.get("basket");
     if (sharedId) {
-      fetchSingleBasket(sharedId);
+      void fetchSingleBasket(sharedId).catch((error) => {
+        console.error("Error fetching shared basket:", error);
+      });
       setActiveTab("shared_view");
     }
 
     return () => {
       listener.subscription.unsubscribe();
     };
-  }, []);
+  }, [fetchSingleBasket]);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const funded = params.get("funded");
+    const sessionId = params.get("session_id");
+    const basketId = params.get("basket");
+    if (funded !== "success" || !sessionId || !basketId) return;
+
+    const confirmCheckout = async () => {
+      try {
+        const response = await fetch("/api/checkout/confirm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ basketId, sessionId }),
+        });
+        const result: { error?: string } = await response.json();
+        if (!response.ok) {
+          throw new Error(result.error || "Could not confirm checkout payment.");
+        }
+
+        await fetchSingleBasket(basketId);
+        await fetchUserBaskets();
+      } catch (error) {
+        console.error("Checkout confirmation error:", error);
+        const errorMessage =
+          error instanceof Error ? error.message : "Could not confirm checkout payment.";
+        alert(errorMessage);
+      }
+    };
+
+    void confirmCheckout();
+  }, [fetchSingleBasket, fetchUserBaskets]);
 
   useEffect(() => {
     if (user) {
@@ -140,45 +226,11 @@ export default function Home() {
       setBaskets([]);
       setVaultSaved(false);
     }
-  }, [user]);
+  }, [user, fetchUserBaskets, fetchUserVault]);
 
   const userHandle =
     user?.user_metadata?.handle ||
     (user?.email ? user.email.split("@")[0].toLowerCase().replace(/[^a-z0-9_]/g, "") : "member");
-
-  const fetchUserBaskets = async () => {
-    if (!user) return;
-    const { data, error } = await supabase
-      .from("baskets")
-      .select("*, basket_items(*)")
-      .eq("owner_id", user.id)
-      .order("created_at", { ascending: false });
-
-    if (!error && data) {
-      setBaskets(data as Basket[]);
-    }
-  };
-
-  const fetchUserVault = async () => {
-    if (!user) return;
-    const { data, error } = await supabase
-      .from("private_vault")
-      .select("*")
-      .eq("user_id", user.id)
-      .maybeSingle();
-
-    if (!error && data) {
-      setVault({
-        recipient_name: data.recipient_name || "",
-        delivery_type: data.delivery_type || "collection_point",
-        address_line_1: data.address_line_1 || "",
-        city: data.city || "",
-        postcode: data.postcode || "",
-        delivery_notes: data.delivery_notes || "",
-      });
-      setVaultSaved(true);
-    }
-  };
 
   const handleSaveVault = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -206,18 +258,6 @@ export default function Home() {
       setVaultStatusMsg("Could not save vault. Ensure private_vault SQL was run in Supabase.");
     } finally {
       setSavingVault(false);
-    }
-  };
-
-  const fetchSingleBasket = async (basketId: string) => {
-    const { data, error } = await supabase
-      .from("baskets")
-      .select("*, basket_items(*)")
-      .eq("id", basketId)
-      .single();
-
-    if (!error && data) {
-      setSharedBasket(data as Basket);
     }
   };
 
@@ -393,20 +433,22 @@ export default function Home() {
     }
     setFundingLoading(true);
     try {
-      const { error } = await supabase
-        .from("baskets")
-        .update({
-          status: "FUNDED",
-          funded_by: userHandle,
-        })
-        .eq("id", basket.id);
-
-      if (error) throw error;
-      setSharedBasket((current) =>
-        current?.id === basket.id ? { ...current, status: "FUNDED", funded_by: userHandle } : current,
-      );
-      await fetchSingleBasket(basket.id);
-      await fetchUserBaskets();
+      const response = await fetch("/api/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          basketId: basket.id,
+          title: basket.title,
+          totalAmount: basket.total_amount,
+          payerName: userHandle,
+          payerEmail: user.email || undefined,
+        }),
+      });
+      const data: { url?: string | null; error?: string } = await response.json();
+      if (!response.ok || !data.url) {
+        throw new Error(data.error || "Could not start checkout.");
+      }
+      window.location.href = data.url;
     } catch (error) {
       console.error("Funding error:", error);
       const errorMessage =
@@ -436,27 +478,22 @@ export default function Home() {
         throw new Error("Enter your name and email address to continue.");
       }
 
-      const { data, error } = await supabase
-        .from("baskets")
-        .update({
-          status: "FUNDED",
-          funded_by: cleanName,
-        })
-        .eq("id", sharedBasket.id)
-        .select();
-
-      if (error || !data || data.length === 0) {
-        console.error("Guest funding update failed:", error ?? "No rows were updated.");
-        alert("Database update blocked by permissions");
-        return;
+      const response = await fetch("/api/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          basketId: sharedBasket.id,
+          title: sharedBasket.title,
+          totalAmount: sharedBasket.total_amount,
+          payerName: cleanName,
+          payerEmail: cleanEmail,
+        }),
+      });
+      const data: { url?: string | null; error?: string } = await response.json();
+      if (!response.ok || !data.url) {
+        throw new Error(data.error || "Could not start checkout.");
       }
-      setSharedBasket((current) =>
-        current?.id === sharedBasket.id
-          ? { ...current, status: "FUNDED", funded_by: cleanName }
-          : current,
-      );
-      setFundingPrompt(null);
-      setGuestReceiptNotice(`Funding complete for ${cleanName}. Receipt email: ${cleanEmail}.`);
+      window.location.href = data.url;
     } catch (error) {
       console.error("Guest funding error:", error);
       const errorMessage =
