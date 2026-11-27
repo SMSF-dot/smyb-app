@@ -20,11 +20,12 @@ interface Basket {
   owner_id: string;
   owner_handle: string;
   title: string;
-  status: "open" | "partially_funded" | "funded" | "fulfilled";
+  status: "open" | "partially_funded" | "funded" | "FUNDED" | "fulfilled";
   split_mode: "full" | "down_payment" | "multi_party";
   owner_contribution: number;
   total_amount: number;
   payer_handle: string | null;
+  funded_by?: string | null;
   boundary_mode: "everyone" | "link_only" | "approved_only";
   created_at: string;
   basket_items?: BasketItem[];
@@ -39,6 +40,9 @@ interface PrivateVault {
   postcode: string;
   delivery_notes: string;
 }
+
+const isBasketFunded = (basket: Pick<Basket, "status">) =>
+  basket.status === "funded" || basket.status === "FUNDED";
 
 export default function Home() {
   const [user, setUser] = useState<User | null>(null);
@@ -392,12 +396,15 @@ export default function Home() {
       const { error } = await supabase
         .from("baskets")
         .update({
-          status: "funded",
-          payer_handle: userHandle,
+          status: "FUNDED",
+          funded_by: userHandle,
         })
         .eq("id", basket.id);
 
       if (error) throw error;
+      setSharedBasket((current) =>
+        current?.id === basket.id ? { ...current, status: "FUNDED", funded_by: userHandle } : current,
+      );
       await fetchSingleBasket(basket.id);
       await fetchUserBaskets();
     } catch (err) {
@@ -408,12 +415,17 @@ export default function Home() {
     }
   };
 
-  const handleGuestFunding = async (e: React.FormEvent, basket: Basket) => {
+  const handleGuestFunding = async (e: React.FormEvent) => {
     e.preventDefault();
     setGuestFundingError(null);
+    setGuestReceiptNotice(null);
     setFundingLoading(true);
 
     try {
+      if (!sharedBasket) {
+        throw new Error("The shared basket is no longer available.");
+      }
+
       const cleanName = guestName.trim();
       const cleanEmail = guestEmail.trim();
       if (!cleanName || !cleanEmail) {
@@ -423,18 +435,26 @@ export default function Home() {
       const { error } = await supabase
         .from("baskets")
         .update({
-          status: "funded",
-          payer_handle: cleanName,
+          status: "FUNDED",
+          funded_by: cleanName,
         })
-        .eq("id", basket.id);
+        .eq("id", sharedBasket.id);
 
       if (error) throw error;
-      await fetchSingleBasket(basket.id);
+      setSharedBasket((current) =>
+        current?.id === sharedBasket.id
+          ? { ...current, status: "FUNDED", funded_by: cleanName }
+          : current,
+      );
       setFundingPrompt(null);
       setGuestReceiptNotice(`Funding complete for ${cleanName}. Receipt email: ${cleanEmail}.`);
     } catch (err) {
       console.error("Guest funding error:", err);
-      setGuestFundingError(err instanceof Error ? err.message : "Could not complete guest funding.");
+      const errorMessage =
+        err && typeof err === "object" && "message" in err && typeof err.message === "string"
+          ? err.message
+          : "Could not complete guest funding.";
+      setGuestFundingError(errorMessage);
     } finally {
       setFundingLoading(false);
     }
@@ -494,7 +514,7 @@ export default function Home() {
               </div>
               <span
                 className={`px-3 py-1 rounded-full text-xs font-bold uppercase ${
-                  sharedBasket.status === "funded"
+                  isBasketFunded(sharedBasket)
                     ? "bg-emerald-100 text-emerald-800"
                     : "bg-amber-100 text-amber-800"
                 }`}
@@ -550,13 +570,13 @@ export default function Home() {
                 )}
                 <p className="text-base font-bold">
                   Remaining to Fund: £
-                  {sharedBasket.status === "funded"
+                  {isBasketFunded(sharedBasket)
                     ? "0.00"
                     : (Number(sharedBasket.total_amount) - Number(sharedBasket.owner_contribution)).toFixed(2)}
                 </p>
               </div>
 
-              {sharedBasket.status !== "funded" ? (
+              {!isBasketFunded(sharedBasket) ? (
                 <button
                   onClick={() => handleFundBasket(sharedBasket)}
                   disabled={fundingLoading}
@@ -566,7 +586,7 @@ export default function Home() {
                 </button>
               ) : (
                 <div className="text-sm font-semibold text-emerald-700 bg-emerald-50 px-4 py-2 rounded-xl border border-emerald-200">
-                  ✓ Funded by 🛒{sharedBasket.payer_handle || "supporter"}
+                  ✓ Funded by {sharedBasket.funded_by || sharedBasket.payer_handle || "supporter"}
                 </div>
               )}
             </div>
@@ -577,7 +597,7 @@ export default function Home() {
               </div>
             )}
 
-            {!user && fundingPrompt === "choices" && sharedBasket.status !== "funded" && (
+            {!user && fundingPrompt === "choices" && !isBasketFunded(sharedBasket) && (
               <div className="mt-5 grid gap-3 sm:grid-cols-2" aria-label="Choose how to fund this basket">
                 <button
                   type="button"
@@ -609,9 +629,9 @@ export default function Home() {
               </div>
             )}
 
-            {!user && fundingPrompt === "guest" && sharedBasket.status !== "funded" && (
+            {!user && fundingPrompt === "guest" && !isBasketFunded(sharedBasket) && (
               <form
-                onSubmit={(e) => handleGuestFunding(e, sharedBasket)}
+                onSubmit={handleGuestFunding}
                 className="mt-5 rounded-xl border border-stone-200 bg-[#F7F5F0] p-5"
               >
                 <h3 className="font-bold text-lg">Continue as Guest</h3>
@@ -673,7 +693,7 @@ export default function Home() {
               </form>
             )}
 
-            {!user && fundingPrompt === "auth" && sharedBasket.status !== "funded" && (
+            {!user && fundingPrompt === "auth" && !isBasketFunded(sharedBasket) && (
               <div className="mt-5 rounded-xl border border-stone-200 bg-[#F7F5F0] p-5">
                 <h3 className="mb-1 text-lg font-bold text-[#23272A]">
                   {isSignUp ? "Claim your SMYB handle" : "Sign in to SMYB"}
@@ -1075,8 +1095,8 @@ export default function Home() {
                             <div className="text-right">
                               <p className="text-xs text-stone-500">Total: £{Number(basket.total_amount).toFixed(2)}</p>
                               <p className="font-bold text-base text-[#23272A]">
-                                {basket.status === "funded"
-                                  ? `Funded by 🛒${basket.payer_handle}`
+                                {isBasketFunded(basket)
+                                  ? `Funded by 🛒${basket.funded_by || basket.payer_handle}`
                                   : `Requesting: £${remaining.toFixed(2)}`}
                               </p>
                             </div>
