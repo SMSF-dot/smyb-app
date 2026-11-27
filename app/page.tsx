@@ -533,7 +533,7 @@ export default function Home() {
               )}
             </div>
 
-            {user && (
+            {user ? (
               <div className="mt-4 pt-3 border-t border-stone-100">
                 <button
                   onClick={() => {
@@ -543,6 +543,20 @@ export default function Home() {
                   className="text-xs text-stone-500 hover:text-[#23272A] underline cursor-pointer"
                 >
                   ← Back to my wallet dashboard
+                </button>
+              </div>
+            ) : (
+              <div className="mt-4 pt-3 border-t border-stone-100">
+                <button
+                  onClick={() => {
+                    const url = new URL(window.location.href);
+                    url.searchParams.delete("basket");
+                    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+                    setActiveTab("my_baskets");
+                  }}
+                  className="text-xs text-stone-500 hover:text-[#23272A] underline cursor-pointer"
+                >
+                  Sign in or claim a handle
                 </button>
               </div>
             )}
@@ -598,7 +612,7 @@ export default function Home() {
               </form>
             )}
           </div>
-        ) : !user ? (
+        ) : !user && activeTab !== "shared_view" ? (
           <div className="max-w-md mx-auto bg-white rounded-2xl shadow-sm border border-stone-200 p-8">
             <h1 className="text-2xl font-bold text-[#23272A] mb-1">
               {isSignUp ? "Claim your SMYB handle" : "Welcome back to SMYB"}
