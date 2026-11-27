@@ -90,6 +90,11 @@ export default function Home() {
   // Shared basket preview state
   const [sharedBasket, setSharedBasket] = useState<Basket | null>(null);
   const [fundingLoading, setFundingLoading] = useState(false);
+  const [fundingPrompt, setFundingPrompt] = useState<"choices" | "auth" | "guest" | null>(null);
+  const [guestName, setGuestName] = useState("");
+  const [guestEmail, setGuestEmail] = useState("");
+  const [guestFundingError, setGuestFundingError] = useState<string | null>(null);
+  const [guestReceiptNotice, setGuestReceiptNotice] = useState<string | null>(null);
 
   useEffect(() => {
     const checkSession = async () => {
@@ -239,6 +244,7 @@ export default function Home() {
         });
         if (error) throw error;
       }
+      setFundingPrompt(null);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Authentication failed.";
       setAuthError(message);
@@ -378,7 +384,7 @@ export default function Home() {
 
   const handleFundBasket = async (basket: Basket) => {
     if (!user) {
-      alert("Please sign in or create a quick account to fund this basket.");
+      setFundingPrompt("choices");
       return;
     }
     setFundingLoading(true);
@@ -397,6 +403,38 @@ export default function Home() {
     } catch (err) {
       console.error("Funding error:", err);
       alert("Could not complete funding.");
+    } finally {
+      setFundingLoading(false);
+    }
+  };
+
+  const handleGuestFunding = async (e: React.FormEvent, basket: Basket) => {
+    e.preventDefault();
+    setGuestFundingError(null);
+    setFundingLoading(true);
+
+    try {
+      const cleanName = guestName.trim();
+      const cleanEmail = guestEmail.trim();
+      if (!cleanName || !cleanEmail) {
+        throw new Error("Enter your name and email address to continue.");
+      }
+
+      const { error } = await supabase
+        .from("baskets")
+        .update({
+          status: "funded",
+          payer_handle: cleanName,
+        })
+        .eq("id", basket.id);
+
+      if (error) throw error;
+      await fetchSingleBasket(basket.id);
+      setFundingPrompt(null);
+      setGuestReceiptNotice(`Funding complete for ${cleanName}. Receipt email: ${cleanEmail}.`);
+    } catch (err) {
+      console.error("Guest funding error:", err);
+      setGuestFundingError(err instanceof Error ? err.message : "Could not complete guest funding.");
     } finally {
       setFundingLoading(false);
     }
@@ -532,6 +570,216 @@ export default function Home() {
                 </div>
               )}
             </div>
+
+            {guestReceiptNotice && (
+              <div role="status" className="mt-4 rounded-xl border border-[#F2994A]/50 bg-[#F2994A]/10 p-3 text-sm">
+                {guestReceiptNotice}
+              </div>
+            )}
+
+            {!user && fundingPrompt === "choices" && sharedBasket.status !== "funded" && (
+              <div className="mt-5 grid gap-3 sm:grid-cols-2" aria-label="Choose how to fund this basket">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFundingPrompt("auth");
+                    setAuthError(null);
+                    setAuthNotice(null);
+                  }}
+                  className="rounded-xl border border-stone-300 bg-[#F7F5F0] p-4 text-left transition hover:border-[#F2994A] hover:bg-[#F2994A]/10 cursor-pointer"
+                >
+                  <span className="block font-bold text-[#23272A]">Sign In or Claim a Handle</span>
+                  <span className="mt-1 block text-sm text-stone-600">
+                    Save receipts, track funded baskets, and keep a verified record of every split.
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFundingPrompt("guest");
+                    setGuestFundingError(null);
+                  }}
+                  className="rounded-xl border border-stone-300 bg-[#F7F5F0] p-4 text-left transition hover:border-[#F2994A] hover:bg-[#F2994A]/10 cursor-pointer"
+                >
+                  <span className="block font-bold text-[#23272A]">Continue as Guest</span>
+                  <span className="mt-1 block text-sm text-stone-600">
+                    Fund this basket straight away with just your name and email for your receipt. No account required.
+                  </span>
+                </button>
+              </div>
+            )}
+
+            {!user && fundingPrompt === "guest" && sharedBasket.status !== "funded" && (
+              <form
+                onSubmit={(e) => handleGuestFunding(e, sharedBasket)}
+                className="mt-5 rounded-xl border border-stone-200 bg-[#F7F5F0] p-5"
+              >
+                <h3 className="font-bold text-lg">Continue as Guest</h3>
+                <p className="mt-1 mb-4 text-sm text-stone-600">
+                  Enter your details to complete funding. Your email will appear in the on-screen receipt confirmation.
+                </p>
+                {guestFundingError && (
+                  <div role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                    {guestFundingError}
+                  </div>
+                )}
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <label htmlFor="guest-name" className="mb-1 block text-xs font-bold uppercase tracking-wider text-stone-600">
+                      Name
+                    </label>
+                    <input
+                      id="guest-name"
+                      type="text"
+                      autoComplete="name"
+                      value={guestName}
+                      onChange={(e) => setGuestName(e.target.value)}
+                      required
+                      className="w-full rounded-xl border border-stone-300 bg-white px-3.5 py-2.5 text-sm focus:border-[#23272A] focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="guest-email" className="mb-1 block text-xs font-bold uppercase tracking-wider text-stone-600">
+                      Email Address
+                    </label>
+                    <input
+                      id="guest-email"
+                      type="email"
+                      autoComplete="email"
+                      value={guestEmail}
+                      onChange={(e) => setGuestEmail(e.target.value)}
+                      required
+                      className="w-full rounded-xl border border-stone-300 bg-white px-3.5 py-2.5 text-sm focus:border-[#23272A] focus:outline-none"
+                    />
+                  </div>
+                </div>
+                <div className="mt-4 flex flex-wrap gap-3">
+                  <button
+                    type="submit"
+                    disabled={fundingLoading}
+                    className="rounded-xl bg-[#F2994A] px-5 py-2.5 font-bold text-[#23272A] transition hover:bg-[#e08636] cursor-pointer disabled:opacity-50"
+                  >
+                    {fundingLoading ? "Processing..." : "Complete Guest Funding"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFundingPrompt("choices")}
+                    disabled={fundingLoading}
+                    className="rounded-xl px-4 py-2.5 text-sm font-semibold text-stone-600 underline cursor-pointer disabled:opacity-50"
+                  >
+                    Back to options
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {!user && fundingPrompt === "auth" && sharedBasket.status !== "funded" && (
+              <div className="mt-5 rounded-xl border border-stone-200 bg-[#F7F5F0] p-5">
+                <h3 className="mb-1 text-lg font-bold text-[#23272A]">
+                  {isSignUp ? "Claim your SMYB handle" : "Sign in to SMYB"}
+                </h3>
+                <p className="mb-4 text-sm text-stone-600">
+                  Your basket link will stay active while you sign in or create an account.
+                </p>
+                {authError && (
+                  <div role="alert" className="mb-4 rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                    {authError}
+                  </div>
+                )}
+                {authNotice && (
+                  <div
+                    role={authNotice.type === "error" ? "alert" : "status"}
+                    className="mb-4 rounded-xl border border-[#F2994A] bg-[#23272A] p-3 text-xs text-[#F7F5F0]"
+                  >
+                    {authNotice.message}
+                  </div>
+                )}
+                <form onSubmit={handleAuth} className="space-y-3">
+                  {isSignUp && (
+                    <div>
+                      <label htmlFor="shared-handle" className="mb-1 block text-xs font-bold uppercase tracking-wider text-stone-600">
+                        Your Trolley Handle
+                      </label>
+                      <input
+                        id="shared-handle"
+                        type="text"
+                        autoComplete="username"
+                        value={handleInput}
+                        onChange={(e) => setHandleInput(e.target.value)}
+                        required
+                        className="w-full rounded-xl border border-stone-300 bg-white px-3.5 py-2.5 text-sm focus:border-[#23272A] focus:outline-none"
+                      />
+                    </div>
+                  )}
+                  <div>
+                    <label htmlFor="shared-auth-email" className="mb-1 block text-xs font-bold uppercase tracking-wider text-stone-600">
+                      Email Address
+                    </label>
+                    <input
+                      id="shared-auth-email"
+                      type="email"
+                      autoComplete="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      required
+                      className="w-full rounded-xl border border-stone-300 bg-white px-3.5 py-2.5 text-sm focus:border-[#23272A] focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="shared-auth-password" className="mb-1 block text-xs font-bold uppercase tracking-wider text-stone-600">
+                      Password
+                    </label>
+                    <input
+                      id="shared-auth-password"
+                      type="password"
+                      autoComplete={isSignUp ? "new-password" : "current-password"}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      required
+                      minLength={6}
+                      className="w-full rounded-xl border border-stone-300 bg-white px-3.5 py-2.5 text-sm focus:border-[#23272A] focus:outline-none"
+                    />
+                    {!isSignUp && (
+                      <button
+                        type="button"
+                        onClick={handleForgotPassword}
+                        disabled={authLoading}
+                        className="mt-2 text-xs text-stone-600 underline cursor-pointer disabled:opacity-50"
+                      >
+                        Forgot password?
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={authLoading}
+                    className="w-full rounded-xl bg-[#23272A] py-3 font-bold text-[#F7F5F0] transition hover:bg-stone-800 cursor-pointer disabled:opacity-50"
+                  >
+                    {authLoading ? "Please wait..." : isSignUp ? "Create Account & Claim Handle" : "Sign In"}
+                  </button>
+                </form>
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-sm">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsSignUp(!isSignUp);
+                      setAuthError(null);
+                      setAuthNotice(null);
+                    }}
+                    className="font-medium text-stone-600 underline cursor-pointer"
+                  >
+                    {isSignUp ? "Already have a handle? Sign in" : "New to SMYB? Claim your handle"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFundingPrompt("choices")}
+                    className="text-stone-600 underline cursor-pointer"
+                  >
+                    Back to funding options
+                  </button>
+                </div>
+              </div>
+            )}
 
             {user ? (
               <div className="mt-4 pt-3 border-t border-stone-100">
