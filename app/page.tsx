@@ -407,9 +407,13 @@ export default function Home() {
       );
       await fetchSingleBasket(basket.id);
       await fetchUserBaskets();
-    } catch (err) {
-      console.error("Funding error:", err);
-      alert("Could not complete funding.");
+    } catch (error) {
+      console.error("Funding error:", error);
+      const errorMessage =
+        error && typeof error === "object" && "message" in error && typeof error.message === "string"
+          ? error.message
+          : "Could not complete funding.";
+      alert(`Could not complete funding: ${errorMessage}`);
     } finally {
       setFundingLoading(false);
     }
@@ -448,12 +452,13 @@ export default function Home() {
       );
       setFundingPrompt(null);
       setGuestReceiptNotice(`Funding complete for ${cleanName}. Receipt email: ${cleanEmail}.`);
-    } catch (err) {
-      console.error("Guest funding error:", err);
+    } catch (error) {
+      console.error("Guest funding error:", error);
       const errorMessage =
-        err && typeof err === "object" && "message" in err && typeof err.message === "string"
-          ? err.message
+        error && typeof error === "object" && "message" in error && typeof error.message === "string"
+          ? error.message
           : "Could not complete guest funding.";
+      alert(`Could not complete funding: ${errorMessage}`);
       setGuestFundingError(errorMessage);
     } finally {
       setFundingLoading(false);
@@ -1075,7 +1080,7 @@ export default function Home() {
                                 <h3 className="font-bold text-lg">{basket.title}</h3>
                                 <span
                                   className={`px-2.5 py-0.5 rounded-full text-xs font-bold uppercase ${
-                                    basket.status === "funded"
+                                    isBasketFunded(basket)
                                       ? "bg-emerald-100 text-emerald-800"
                                       : basket.status === "partially_funded"
                                       ? "bg-amber-100 text-amber-800"
