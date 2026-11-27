@@ -48,8 +48,7 @@ export async function POST(req: Request) {
   const { data, error } = await supabase
     .from("baskets")
     .update({
-      status: "FUNDED",
-      funded_by: session.metadata?.payerName || "Guest",
+      status: "funded",
     })
     .eq("id", body.basketId)
     .select("id")
@@ -57,12 +56,12 @@ export async function POST(req: Request) {
 
   if (error) {
     console.error("Failed to update funded basket:", error);
-    return Response.json({ error: "Could not update basket after payment" }, { status: 500 });
+    return Response.json({ error: error.message }, { status: 500 });
   }
 
   if (!data) {
     return Response.json({ error: "Basket not found" }, { status: 404 });
   }
 
-  return Response.json({ basketId: data.id, status: "FUNDED" });
+  return Response.json({ basketId: data.id, status: "funded" });
 }

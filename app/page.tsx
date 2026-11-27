@@ -211,7 +211,7 @@ export default function Home() {
         console.error("Checkout confirmation error:", error);
         const errorMessage =
           error instanceof Error ? error.message : "Could not confirm checkout payment.";
-        alert(errorMessage);
+        alert(`Could not confirm checkout payment: ${errorMessage}`);
       }
     };
 
